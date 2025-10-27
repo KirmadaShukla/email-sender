@@ -14,7 +14,7 @@ app.use(cors({
 app.use(express.json());
 
 // Create transporter object using SMTP transport
-const transporter = nodemailer.createTransporter({
+const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
     user: process.env.EMAIL_USER || 'abhiisheek1@gmail.com',
