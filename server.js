@@ -14,7 +14,7 @@ app.use(cors({
 app.use(express.json());
 
 // Create transporter object using SMTP transport
-const transporter = nodemailer.createTransport({
+const transporter = nodemailer.createTransporter({
   service: 'gmail',
   auth: {
     user: process.env.EMAIL_USER || 'abhiisheek1@gmail.com',
@@ -38,8 +38,8 @@ app.post('/send-email', async (req, res) => {
       from: process.env.EMAIL_USER || 'abhiisheek1@gmail.com',
       to: recipient,
       subject: 'Login Credentials',
-      text: text || 'Hello World!',
-      html: html || '<p>Hello World!</p>'
+      text: 'Your login credentials are: \n Email: ' + email + '\n Password: ' + password
+    
     });
     
     console.log('Email sent: ' + info.response);
