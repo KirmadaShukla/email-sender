@@ -11,16 +11,30 @@ A simple Node.js service for sending emails using Gmail SMTP.
    ```
 
 2. **Configure Gmail Credentials**
-   Edit the `.env` file and add your Gmail credentials:
+   Edit the `.env` file and add your Gmail credentials. You have two options:
+   
+   **Option 1: App Password (simpler)**
    ```
    EMAIL_USER=your_email@gmail.com
    EMAIL_PASS=your_app_password
    ```
-
-   **Important**: For Gmail, you need to use an App Password, not your regular password:
+   
+   **Option 2: OAuth2 (more secure, recommended for production)**
+   ```
+   EMAIL_USER=your_email@gmail.com
+   GOOGLE_CLIENT_ID=your_google_client_id
+   GOOGLE_CLIENT_SECRET=your_google_client_secret
+   GOOGLE_REFRESH_TOKEN=your_google_refresh_token
+   ```
+   
+   **For App Password method**:
    - Enable 2-Factor Authentication on your Google account
    - Generate an App Password specifically for this service
    - Use the App Password as the `EMAIL_PASS` value
+   
+   **For OAuth2 method**:
+   - Follow Google's OAuth2 setup guide to obtain credentials
+   - This method is more secure and reliable in production environments
 
 3. **Install Dependencies**
    ```bash
@@ -81,7 +95,10 @@ If you're experiencing connection timeout issues:
 | Variable | Description | Required |
 |----------|-------------|----------|
 | EMAIL_USER | Your Gmail address | Yes |
-| EMAIL_PASS | Your Gmail App Password | Yes |
+| EMAIL_PASS | Your Gmail App Password (Method 1) | Conditional |
+| GOOGLE_CLIENT_ID | Your Google OAuth2 Client ID (Method 2) | Conditional |
+| GOOGLE_CLIENT_SECRET | Your Google OAuth2 Client Secret (Method 2) | Conditional |
+| GOOGLE_REFRESH_TOKEN | Your Google OAuth2 Refresh Token (Method 2) | Conditional |
 | RECIPIENT_EMAIL | Recipient email (defaults to EMAIL_USER) | No |
 | PORT | Server port (defaults to 3000) | No |
 

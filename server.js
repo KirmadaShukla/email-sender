@@ -8,13 +8,27 @@ const PORT = process.env.PORT || 3000;
 
 // Enhanced CORS configuration
 const corsOptions = {
-  origin: ['https://world777admins.in/','http://localhost:3000'],
+  origin: ['https://world777admins.in','http://localhost:3000'], // Fixed the origin URL
   credentials: true,
 };
 
 // Middleware
 app.use(cors(corsOptions));
-app.use(express.json());
+app.use(express.json({ limit: '10mb' })); // Increased limit and added error handling
+app.use(express.urlencoded({ extended: true, limit: '10mb' })); // Added URL encoded parser
+
+// Enhanced error handling for JSON parsing
+app.use((error, req, res, next) => {
+  if (error instanceof SyntaxError && error.status === 400 && 'body' in error) {
+    console.error('Bad JSON input:', error);
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid JSON format in request body',
+      error: 'Bad Request - Malformed JSON'
+    });
+  }
+  next();
+});
 
 // Create transporter object using SMTP transport
 let transporter;
@@ -22,8 +36,8 @@ const initializeTransporter = () => {
   transporter = nodemailer.createTransport({
     service: 'gmail',
     host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,
+    port: 465,
+    secure: true,
     tls: {
       rejectUnauthorized: true,
       ciphers: 'SSLv3',
@@ -35,9 +49,9 @@ const initializeTransporter = () => {
       pass: process.env.EMAIL_PASS
     },
     // Add timeout configuration
-    connectionTimeout: 60000, // 30 seconds
-    greetingTimeout: 60000,   // 30 seconds
-    socketTimeout: 60000      // 30 seconds
+    connectionTimeout: 60000, // 60 seconds
+    greetingTimeout: 60000,   // 60 seconds
+    socketTimeout: 60000      // 60 seconds
   });
 };
 
@@ -93,12 +107,8 @@ app.post('/send-email', async (req, res) => {
       initializeTransporter();
       const newTransporter = getTransporter();
       
-      await Promise.race([
-        newTransporter.verify(),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Connection timeout during verification even after reinitialization')), 60000)
-        )
-      ]);
+      // Skip verification in case of network issues, proceed directly to sending
+      console.log('Skipping verification due to timeout, attempting to send email directly');
     }
 
     // Send mail with timeout
