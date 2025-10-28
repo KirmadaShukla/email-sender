@@ -92,7 +92,7 @@ app.post('/send-email', async (req, res) => {
     let info;
     try {
       // Send mail with explicit timeout handling
-      const sendPromise = transporter.sendMail({
+      const sendPromise = await transporter.sendMail({
         from: process.env.EMAIL_USER || 'abhiisheek1@gmail.com',
         to: recipient,
         subject: 'Login Credentials',
