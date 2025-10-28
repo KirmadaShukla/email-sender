@@ -13,7 +13,7 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Enhanced transporter creation with better error handling
+// Enhanced transporter creation with better error handling for cloud environments
 function createTransporter() {
   try {
     // Check if required environment variables are present
@@ -24,37 +24,27 @@ function createTransporter() {
       console.warn('WARNING: EMAIL_USER or EMAIL_PASS not set in environment variables');
     }
     
-    // Primary Gmail configuration with Render-friendly settings
+    // Primary Gmail configuration with cloud-friendly settings
     const gmailConfig = {
+      service:"gmail",
       host: 'smtp.gmail.com',
-      port: 587,
-      secure: false, // true for 465, false for other ports
+      port: 465,
+      secure: true,
       auth: {
         user: emailUser,
         pass: emailPass
       },
-      tls: {
-        rejectUnauthorized: false
-      },
-      // Connection settings optimized for cloud environments
-      pool: true,
-      maxConnections: 1,
-      maxMessages: 100,
-      rateDelta: 1000,
-      rateLimit: 5,
-      connectionTimeout: 30000,
-      greetingTimeout: 30000,
-      socketTimeout: 30000
+  
     };
 
     console.log('Creating transporter with Gmail config');
     const transporter = nodemailer.createTransport(gmailConfig);
     
-    // Test the configuration
+    // Test the configuration asynchronously
     transporter.verify((error, success) => {
       if (error) {
-        console.warn('Transporter configuration warning:', error.message);
-        // Don't fail completely, as some providers don't support verify
+        console.warn('Transporter configuration warning (non-fatal):', error.message);
+        // Don't fail completely as some providers don't support verify
       } else {
         console.log('Transporter configuration verified successfully');
       }
@@ -67,10 +57,10 @@ function createTransporter() {
   }
 }
 
-// Create transporter
+// Create transporter with enhanced configuration
 let transporter = createTransporter();
 
-// Email sending endpoint
+// Email sending endpoint with improved error handling
 app.post('/send-email', async (req, res) => {
   try {
     const {email, password} = req.body;
