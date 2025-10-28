@@ -35,21 +35,24 @@ const isRateLimited = () => {
   return sentLog.length >= RATE_LIMIT;
 };
 
-/* ---------- TRANSPORTER (App Password only) ---------- */
+/* ---------- TRANSPORTER (using STARTTLS port 587) ---------- */
 let transporter = null;
 
 const createTransporter = () => {
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+  const { EMAIL_USER, EMAIL_PASS } = process.env;
+  if (!EMAIL_USER || !EMAIL_PASS) {
     throw new Error('EMAIL_USER and EMAIL_PASS must be set in .env');
   }
 
+  console.log('Creating new SMTP transporter...');
+
   return nodemailer.createTransport({
     host: 'smtp.gmail.com',
-    port: 465,
-    secure: true, // SSL
+    port: 587,
+    secure: false, // use STARTTLS (works better than SSL on 465 for most hosts)
     auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS, // 16-char App Password
+      user: EMAIL_USER,
+      pass: EMAIL_PASS, // 16-character App Password
     },
     connectionTimeout: 60_000,
     greetingTimeout: 60_000,
@@ -69,7 +72,7 @@ const getTransporter = async () => {
       new Promise((_, rej) => setTimeout(() => rej(new Error('verify timeout')), 30_000))
     ]);
   } catch (err) {
-    console.warn('Transporter verify failed → recreating:', err.message);
+    console.warn('⚠️ Transporter verify failed → recreating:', err.message);
     transporter.close?.();
     transporter = createTransporter();
     await transporter.verify(); // final check
@@ -83,7 +86,7 @@ const getTransporter = async () => {
 app.get('/', (req, res) => {
   res.json({
     success: true,
-    message: 'Email API is running!',
+    message: '✅ Email API is running!',
     timestamp: new Date().toISOString()
   });
 });
@@ -115,11 +118,11 @@ app.post('/send-email', async (req, res) => {
     ]);
 
     sentLog.push(Date.now());
-    console.log('Email sent →', info.messageId);
+    console.log('✅ Email sent →', info.messageId);
 
     res.json({ success: true, message: 'Email sent', messageId: info.messageId });
   } catch (err) {
-    console.error('Send failed:', err.message);
+    console.error('❌ Send failed:', err);
     res.status(500).json({
       success: false,
       message: 'Failed to send email',
@@ -128,11 +131,12 @@ app.post('/send-email', async (req, res) => {
   }
 });
 
-// Reinitialize transporter (e.g. after changing .env)
+// Reinitialize transporter
 app.post('/reinit-transporter', (req, res) => {
   try {
     transporter?.close?.();
     transporter = null;
+    console.log('♻️ Transporter reset manually.');
     res.json({ success: true, message: 'Transporter reset' });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
@@ -142,13 +146,14 @@ app.post('/reinit-transporter', (req, res) => {
 /* ---------- START SERVER ---------- */
 (async () => {
   try {
-    await getTransporter(); // warm-up
+    console.log('🚀 Starting Email API Server...');
+    await getTransporter(); // warm-up check
     await app.listen(PORT);
-    console.log(`Server running on port ${PORT}`);
+    console.log(`✅ Server running on port ${PORT}`);
     console.log(`Health: http://localhost:${PORT}/`);
     console.log(`Send:   POST http://localhost:${PORT}/send-email`);
   } catch (err) {
-    console.error('Startup error:', err);
+    console.error('❌ Startup error:', err);
     process.exit(1);
   }
 })();
