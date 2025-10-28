@@ -9,7 +9,8 @@
     "lint": "echo \"Linting...\"",
     "dev": "nodemon server.js",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "test-env": "node test-env.js"
+    "test-env": "node test-env.js",
+    "diagnose": "node diagnose-email.js"
   },
   "keywords": [],
   "author": "",

