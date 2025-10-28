@@ -13,42 +13,58 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Enhanced transporter creation with better error handling for cloud environments
+// Enhanced transporter creation with multiple provider support
 function createTransporter() {
   try {
     // Check if required environment variables are present
     const emailUser = process.env.EMAIL_USER || 'abhiisheek1@gmail.com';
     const emailPass = process.env.EMAIL_PASS || 'kyqd ecvf avzp ayzo';
     
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-      console.warn('WARNING: EMAIL_USER or EMAIL_PASS not set in environment variables');
+    console.log('EMAIL_USER:', emailUser ? `${emailUser.substring(0, 5)}...` : 'Not set');
+    console.log('EMAIL_PASS:', emailPass ? 'SET' : 'Not set');
+    
+    // Try SendGrid first if API key is provided
+    if (process.env.SENDGRID_API_KEY) {
+      console.log('Using SendGrid transporter');
+      return nodemailer.createTransport({
+        host: 'smtp.sendgrid.net',
+        port: 587,
+        secure: false,
+        auth: {
+          user: 'apikey',
+          pass: process.env.SENDGRID_API_KEY
+        }
+      });
     }
     
-    // Primary Gmail configuration with cloud-friendly settings
+    // Try Mailgun if API key is provided
+    if (process.env.MAILGUN_API_KEY && process.env.MAILGUN_DOMAIN) {
+      console.log('Using Mailgun transporter');
+      return nodemailer.createTransport({
+        host: 'smtp.mailgun.org',
+        port: 587,
+        secure: false,
+        auth: {
+          user: process.env.MAILGUN_DOMAIN,
+          pass: process.env.MAILGUN_API_KEY
+        }
+      });
+    }
+    
+    // Fallback to Gmail with optimized settings
+    console.log('Using Gmail transporter with optimized settings');
     const gmailConfig = {
-      service:"gmail",
+      service: "gmail",
       host: 'smtp.gmail.com',
       port: 465,
       secure: true,
       auth: {
         user: emailUser,
         pass: emailPass
-      },
-  
+      }
     };
 
-    console.log('Creating transporter with Gmail config');
     const transporter = nodemailer.createTransport(gmailConfig);
-    
-    // Test the configuration asynchronously
-    transporter.verify((error, success) => {
-      if (error) {
-        console.warn('Transporter configuration warning (non-fatal):', error.message);
-        // Don't fail completely as some providers don't support verify
-      } else {
-        console.log('Transporter configuration verified successfully');
-      }
-    });
     
     return transporter;
   } catch (error) {
@@ -57,10 +73,10 @@ function createTransporter() {
   }
 }
 
-// Create transporter with enhanced configuration
+// Create transporter
 let transporter = createTransporter();
 
-// Email sending endpoint with improved error handling
+// Email sending endpoint
 app.post('/send-email', async (req, res) => {
   try {
     const {email, password} = req.body;
@@ -73,51 +89,41 @@ app.post('/send-email', async (req, res) => {
       });
     }
     
-    // Default to recipient from env or the same as sender
-    const recipient = process.env.RECIPIENT_EMAIL || process.env.EMAIL_USER || email;
-    
-    console.log('Attempting to send email to:', recipient);
-    console.log('Using sender:', process.env.EMAIL_USER || 'abhiisheek1@gmail.com');
+    console.log('Received request to send email to:', email);
     
     // Check if transporter exists
     if (!transporter) {
+      console.error('Transporter not initialized');
       return res.status(500).json({
         success: false,
-        message: 'Email service is not properly configured. Please check server logs.'
+        message: 'Email service is not properly configured. Please check server logs and environment variables.'
       });
     }
     
-    // Try to send email with improved error handling
-    console.log('Sending email...');
+    // Try to send email
+    console.log('Attempting to send email...');
     let info;
+    
     try {
-      // Send mail with explicit timeout handling
-      const sendPromise = await transporter.sendMail({
+      const mailOptions = {
         from: process.env.EMAIL_USER || 'abhiisheek1@gmail.com',
-        to: recipient,
+        to: email,
         subject: 'Login Credentials',
         text: 'Your login credentials are: \n Email: ' + email + '\n Password: ' + password
-      });
+      };
       
-      // Implement timeout manually
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Email send operation timed out after 30 seconds')), 30000);
-      });
-      
-      info = await Promise.race([sendPromise, timeoutPromise]);
-      console.log('SendMail completed, info object:', info);
+      info = await transporter.sendMail(mailOptions);
+      console.log('Email sent successfully, info:', info.messageId);
     } catch (sendError) {
-      console.error('Error during sendMail:', sendError);
+      console.error('SendMail error:', sendError);
       
-      // Provide more specific error handling
+      // Provide specific error messages
       let errorMessage = 'Failed to send email';
       
       if (sendError.code === 'ECONNECTION' || sendError.code === 'ETIMEDOUT') {
-        errorMessage = 'Connection to email server failed. This commonly occurs in cloud hosting environments due to network restrictions. Consider using an email service provider like SendGrid or Mailgun.';
+        errorMessage = 'Connection to email server failed. This is a common issue in cloud hosting environments. Consider using SendGrid or Mailgun for reliable email delivery.';
       } else if (sendError.code === 'EAUTH') {
-        errorMessage = 'Authentication failed. Please verify your email credentials are correct and you\'re using an App Password for Gmail.';
-      } else if (sendError.message.includes('timeout')) {
-        errorMessage = 'Email operation timed out. The connection to the email server is taking too long, possibly due to network restrictions.';
+        errorMessage = 'Authentication failed. Please verify your email credentials are correct.';
       } else {
         errorMessage = 'Failed to send email: ' + sendError.message;
       }
@@ -132,7 +138,6 @@ app.post('/send-email', async (req, res) => {
     // Success response
     if (info) {
       console.log('Email sent successfully');
-      console.log('Message ID:', info.messageId);
       res.status(200).json({ 
         success: true, 
         message: 'Email sent successfully', 
@@ -146,7 +151,7 @@ app.post('/send-email', async (req, res) => {
       });
     }
   } catch (error) {
-    console.error('Unexpected error sending email:', error);
+    console.error('Unexpected error in send-email endpoint:', error);
     res.status(500).json({ 
       success: false, 
       message: 'An unexpected error occurred while sending the email',
@@ -161,73 +166,25 @@ app.get('/', (req, res) => {
     success: true, 
     message: 'Email API is running!',
     timestamp: new Date().toISOString(),
-    transporter: transporter ? 'configured' : 'not configured'
+    transporter: transporter ? 'configured' : 'not configured',
+    env: {
+      EMAIL_USER: process.env.EMAIL_USER ? 'SET' : 'NOT SET',
+      EMAIL_PASS: process.env.EMAIL_PASS ? 'SET' : 'NOT SET',
+      SENDGRID_API_KEY: process.env.SENDGRID_API_KEY ? 'SET' : 'NOT SET',
+      MAILGUN_API_KEY: process.env.MAILGUN_API_KEY ? 'SET' : 'NOT SET'
+    }
   });
 });
 
-// Test transporter endpoint
-app.get('/test-transporter', async (req, res) => {
-  try {
-    if (!transporter) {
-      return res.status(500).json({ 
-        success: false, 
-        message: 'Email transporter is not configured properly' 
-      });
-    }
-    
-    res.status(200).json({ 
-      success: true, 
-      message: 'Transporter exists and is configured',
-      config: {
-        host: transporter.options.host,
-        port: transporter.options.port,
-        secure: transporter.options.secure
-      }
-    });
-  } catch (error) {
-    console.error('Transporter test error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Transporter test failed',
-      error: error.message
-    });
-  }
-});
-
-// Reinitialize transporter endpoint
-app.post('/reinit-transporter', (req, res) => {
-  try {
-    console.log('Reinitializing transporter...');
-    transporter = createTransporter();
-    if (transporter) {
-      res.status(200).json({ 
-        success: true, 
-        message: 'Transporter reinitialized successfully' 
-      });
-    } else {
-      res.status(500).json({ 
-        success: false, 
-        message: 'Failed to reinitialize transporter' 
-      });
-    }
-  } catch (error) {
-    console.error('Transporter reinitialization error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Transporter reinitialization failed',
-      error: error.message
-    });
-  }
-});
-
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server is running on port ${PORT}`);
   
   // Log environment info
   console.log('Environment variables:');
-  console.log('- EMAIL_USER:', process.env.EMAIL_USER ? `${process.env.EMAIL_USER.substring(0, 5)}...@${process.env.EMAIL_USER.split('@')[1]}` : 'Not set');
-  console.log('- EMAIL_PASS:', process.env.EMAIL_PASS ? 'SET (App Password)' : 'Not set');
-  console.log('- RECIPIENT_EMAIL:', process.env.RECIPIENT_EMAIL ? 'SET' : 'Not set');
+  console.log('- EMAIL_USER:', process.env.EMAIL_USER ? `${process.env.EMAIL_USER.substring(0, 5)}...` : 'Not set');
+  console.log('- EMAIL_PASS:', process.env.EMAIL_PASS ? 'SET' : 'Not set');
+  console.log('- SENDGRID_API_KEY:', process.env.SENDGRID_API_KEY ? 'SET' : 'Not set');
+  console.log('- MAILGUN_API_KEY:', process.env.MAILGUN_API_KEY ? 'SET' : 'Not set');
   console.log('- PORT:', PORT);
   
   // Test transporter availability
@@ -236,19 +193,4 @@ const server = app.listen(PORT, () => {
   } else {
     console.log('WARNING: Transporter failed to initialize');
   }
-});
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down gracefully');
-  server.close(() => {
-    console.log('Process terminated');
-  });
-});
-
-process.on('SIGINT', () => {
-  console.log('SIGINT received, shutting down gracefully');
-  server.close(() => {
-    console.log('Process terminated');
-  });
 });
